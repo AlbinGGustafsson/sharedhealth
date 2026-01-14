@@ -1,15 +1,18 @@
 package dev.neddslayer.sharedhealth;
 
+import dev.neddslayer.sharedhealth.commands.SetSharedHealthCommand;
 import dev.neddslayer.sharedhealth.components.SharedExhaustionComponent;
 import dev.neddslayer.sharedhealth.components.SharedHealthComponent;
 import dev.neddslayer.sharedhealth.components.SharedHungerComponent;
 import dev.neddslayer.sharedhealth.components.SharedSaturationComponent;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.gamerule.v1.GameRuleFactory;
 import net.fabricmc.fabric.api.gamerule.v1.GameRuleRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.world.GameRules;
@@ -32,6 +35,11 @@ public class SharedHealth implements ModInitializer {
      */
     @Override
     public void onInitialize() {
+        // Registrera kommandot
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            SetSharedHealthCommand.register(dispatcher);
+        });
+
         ServerTickEvents.END_WORLD_TICK.register((world -> {
             boolean currentHealthValue = world.getGameRules().getBoolean(SYNC_HEALTH);
             boolean currentHungerValue = world.getGameRules().getBoolean(SYNC_HUNGER);
@@ -72,28 +80,28 @@ public class SharedHealth implements ModInitializer {
             }
             if (world.getGameRules().getBoolean(SYNC_HUNGER)) {
                 SharedHungerComponent component = SHARED_HUNGER.get(world.getScoreboard());
-	            SharedSaturationComponent saturationComponent = SHARED_SATURATION.get(world.getScoreboard());
-	            SharedExhaustionComponent exhaustionComponent = SHARED_EXHAUSTION.get(world.getScoreboard());
+                SharedSaturationComponent saturationComponent = SHARED_SATURATION.get(world.getScoreboard());
+                SharedExhaustionComponent exhaustionComponent = SHARED_EXHAUSTION.get(world.getScoreboard());
                 if (component.getHunger() > 20) component.setHunger(20);
-				if (saturationComponent.getSaturation() > 20) saturationComponent.setSaturation(20.0f);
+                if (saturationComponent.getSaturation() > 20) saturationComponent.setSaturation(20.0f);
                 int finalKnownHunger = component.getHunger();
-				float finalKnownSaturation = saturationComponent.getSaturation();
-				float finalKnownExhaustion = exhaustionComponent.getExhaustion();
+                float finalKnownSaturation = saturationComponent.getSaturation();
+                float finalKnownExhaustion = exhaustionComponent.getExhaustion();
                 world.getPlayers().forEach(playerEntity -> {
                     try {
                         float currentHunger = playerEntity.getHungerManager().getFoodLevel();
-						float currentSaturation = playerEntity.getHungerManager().getSaturationLevel();
-						float currentExhaustion = playerEntity.getHungerManager().getExhaustion();
+                        float currentSaturation = playerEntity.getHungerManager().getSaturationLevel();
+                        float currentExhaustion = playerEntity.getHungerManager().getExhaustion();
 
                         if (currentHunger != finalKnownHunger) {
                             playerEntity.getHungerManager().setFoodLevel(finalKnownHunger);
                         }
-						if (currentSaturation != finalKnownSaturation) {
-							playerEntity.getHungerManager().setSaturationLevel(finalKnownSaturation);
-						}
-						if (currentExhaustion != finalKnownExhaustion) {
-							playerEntity.getHungerManager().setExhaustion(finalKnownExhaustion);
-						}
+                        if (currentSaturation != finalKnownSaturation) {
+                            playerEntity.getHungerManager().setSaturationLevel(finalKnownSaturation);
+                        }
+                        if (currentExhaustion != finalKnownExhaustion) {
+                            playerEntity.getHungerManager().setExhaustion(finalKnownExhaustion);
+                        }
                     } catch (Exception e) {
                         System.out.println(e.getMessage());
                     }
@@ -101,8 +109,27 @@ public class SharedHealth implements ModInitializer {
             }
         }));
 
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> handler.player.setHealth(SHARED_HEALTH.get(handler.player.getWorld().getScoreboard()).getHealth()));
+        // När spelare joinar: sätt rätt health OCH max health om det konfigurerats
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            SharedHealthComponent healthComponent = SHARED_HEALTH.get(handler.player.getWorld().getScoreboard());
+            float sharedHealth = healthComponent.getHealth();
+            
+            // Om shared health är över 20 måste vi också sätta max health
+            if (sharedHealth > 20) {
+                handler.player.getAttributeInstance(EntityAttributes.GENERIC_MAX_HEALTH).setBaseValue(sharedHealth);
+            }
+            handler.player.setHealth(sharedHealth);
+        });
 
-        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> newPlayer.setHealth(SHARED_HEALTH.get(newPlayer.getWorld().getScoreboard()).getHealth()));
+        // Efter respawn: samma logik
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+            SharedHealthComponent healthComponent = SHARED_HEALTH.get(newPlayer.getWorld().getScoreboard());
+            float sharedHealth = healthComponent.getHealth();
+            
+            if (sharedHealth > 20) {
+                newPlayer.getAttributeInstance(EntityAttributes.GENERIC_MAX_HEALTH).setBaseValue(sharedHealth);
+            }
+            newPlayer.setHealth(sharedHealth);
+        });
     }
 }
